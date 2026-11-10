@@ -1,0 +1,100 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - name: Linux / GCC
+            os: ubuntu-latest
+            cc: gcc
+
+          - name: Linux / Clang
+            os: ubuntu-latest
+            cc: clang
+
+          - name: macOS / Clang
+            os: macos-latest
+            cc: clang
+
+          - name: Windows / MSVC
+            os: windows-latest
+            cc: cl
+
+    env:
+      CC: ${{ matrix.cc }}
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Configure Debug
+        run: >-
+          cmake -S . -B build/debug
+          -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build Debug
+        run: cmake --build build/debug --config Debug --parallel
+
+      - name: Test Debug
+        run: ctest --test-dir build/debug --build-config Debug --output-on-failure
+
+      - name: Configure Release
+        run: >-
+          cmake -S . -B build/release
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Release
+        run: cmake --build build/release --config Release --parallel
+
+      - name: Test Release
+        run: ctest --test-dir build/release --build-config Release --output-on-failure
+
+      - name: Configure package installation
+        run: >-
+          cmake -S . -B build/install
+          -DACKORD_BUILD_TESTS=OFF
+          -DACKORD_BUILD_EXAMPLES=OFF
+          -DACKORD_INSTALL=ON
+          -DCMAKE_INSTALL_INCLUDEDIR=include/ackord-0.1
+          "-DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install"
+
+      - name: Build package
+        run: cmake --build build/install --config Release --parallel
+
+      - name: Install package
+        run: cmake --install build/install --config Release
+
+      - name: Configure package consumer
+        run: >-
+          cmake -S tests/package -B build/package
+          "-DCMAKE_PREFIX_PATH=${{ github.workspace }}/install"
+
+      - name: Build package consumer
+        run: cmake --build build/package --config Release --parallel
+
+      - name: Test package consumer
+        run: ctest --test-dir build/package --build-config Release --output-on-failure
+
+      - name: Configure ASan and UBSan
+        if: matrix.cc == 'clang' && runner.os == 'Linux'
+        run: >-
+          cmake -S . -B build/sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined
+
+      - name: Build ASan and UBSan
+        if: matrix.cc == 'clang' && runner.os == 'Linux'
+        run: cmake --build build/sanitize --config Debug --parallel
+
+      - name: Test ASan and UBSan
+        if: matrix.cc == 'clang' && runner.os == 'Linux'
+        run: ctest --test-dir build/sanitize --build-config Debug --output-on-failure
